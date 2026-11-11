@@ -37,7 +37,8 @@ export const theme = {
   overlay: {
     "cell-dim": "rgba(31,36,48,0.38)",
     "scrim": "rgba(31,36,48,0.55)",
-    "cell-line": "rgba(31,36,48,0.12)"
+    "cell-line": "rgba(31,36,48,0.12)",
+    "cell-press": "rgba(255,255,255,0.28)"
   },
   font: { sans: 'Nunito', arabic: 'Cairo' },
   type: {
@@ -76,8 +77,8 @@ export const theme = {
   radius: {"cell":4,"sm":8,"md":12,"lg":16,"pill":999},
   border: {"hairline":1,"region":2,"focus":2,"active-card":2,"outline":3},
   size: {"touch-min":44,"icon-button":40,"screen-padding":16,"board-frame":6,"board-padding":5,"cell-gap":5,"header-height":64,"content-max":500,"button":48,"dot":20,"focus-offset":2,"kind":26},
-  scale: {"piece":0.8,"mark":0.5,"auto-mark":0.3,"pressed":0.96,"piece-pad":0.07,"lost":0.6,"unlit":0.4},
-  motion: {"fast":120,"base":200,"celebrate":600,"ease":"cubic-bezier(.2,.8,.2,1)"},
+  scale: {"piece":0.8,"mark":0.5,"auto-mark":0.3,"pressed":0.96,"piece-pad":0.07,"lost":0.6,"unlit":0.4,"cell-pressed":0.9},
+  motion: {"fast":120,"base":200,"celebrate":600,"ease":"cubic-bezier(.2,.8,.2,1)","screen":220,"spring":"cubic-bezier(.3,1.5,.5,1)"},
 } as const;
 
 export const regionColors = [theme.color['region-1'], theme.color['region-2'], theme.color['region-3'], theme.color['region-4'], theme.color['region-5'], theme.color['region-6'], theme.color['region-7'], theme.color['region-8'], theme.color['region-9'], theme.color['region-10'], theme.color['region-11'], theme.color['region-12']] as const;

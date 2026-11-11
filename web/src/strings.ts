@@ -51,6 +51,7 @@ export const S = {
   lostBody: 'Three wormy picks end the attempt. The board starts over.',
   tryAgain: 'Try again',
   settingsTitle: 'Settings',
+  haptics: 'Vibration',
   outlines: 'Draw outlines around each kind',
   showRules: 'Show the rules above the board',
   resetProgress: 'Reset all progress',

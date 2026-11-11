@@ -132,6 +132,19 @@ const p1 = await level(1);
 const n = p1.size;
 check('header shows points and no time', await js(`[...document.querySelectorAll('.stat small')].map(e => e.textContent).join() === 'Level,Points'`));
 check('a fresh level is worth 100 x its grade', (await js(`document.querySelectorAll('.stat b')[1].textContent`)) === String(100 * p1.difficulty));
+check('the page cannot be zoomed or scrolled', await js(`document.querySelector('meta[name=viewport]').content.includes('user-scalable=no') && getComputedStyle(document.body).position === 'fixed' && getComputedStyle(document.documentElement).overflow === 'hidden'`));
+const fitsScreen = (): Promise<any> => js(`(() => { const b = document.querySelector('.board').getBoundingClientRect(); const last = [...document.querySelectorAll('.screen.game .btn')].pop().getBoundingClientRect();
+  return { square: Math.abs(b.width - b.height) < 2, width: Math.round(b.width), inside: b.top >= 0 && b.bottom <= last.top && last.bottom <= window.innerHeight, cell: Math.round(document.querySelector('.cell').getBoundingClientRect().width) }; })()`);
+const fit414 = await fitsScreen();
+check('the whole level fits one screen at 414 x 736', fit414.square && fit414.inside && fit414.width >= 300, JSON.stringify(fit414));
+{
+  const p = await centre('.cell', 7);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: p!.x, y: p!.y, button: 'left', clickCount: 1 });
+  check('a cell reacts the moment it is pressed', (await js(`document.querySelectorAll('.cell.pressed').length`)) === 1);
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5, button: 'left' });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 5, y: 5, button: 'left', clickCount: 1 });
+  check('sliding off a cell cancels the tap', (await js(`document.querySelectorAll('.cell.pressed').length`)) === 0 && (await session()).state.marks[7] === 0);
+}
 check('board has size x size cells', (await js(`document.querySelectorAll('.cell').length`)) === n * n);
 await shot('docs/screens/S04-fresh.png');
 
@@ -164,8 +177,21 @@ check('no cells are marked automatically', st.marks.filter((m: number) => m !== 
 check('the found kind lights up in the tracker', (await js(`[...document.querySelectorAll('.kind')].map(k => k.classList.contains('found')).join()`)) === [...Array(n).keys()].map((k) => k === p1.regions[row0][p1.solution[row0]]).join());
 check('found cell shows a fruit icon', await js(`!!document.querySelectorAll('.cell')[${row0 * n + p1.solution[row0]}].querySelector('.piece svg')`));
 check('tracker shows one more piece', (await js(`document.querySelectorAll('.kind.found').length`)) === st.found.filter((c: number) => c !== -1).length);
+await js(`document.querySelector('.cell .piece').__kept = true; document.querySelector('.kind.found').__kept = true`);
 await sleep(400);
 await shot('docs/screens/S04-in-progress.png');
+
+/* 5b. A later move must not redraw pieces already on the board. */
+{
+  const s5 = (await session()).state;
+  const freeRow = openRows(s5)[0];
+  const freeCol = [...Array(n).keys()].find((c) => c !== p1.solution[freeRow] && s5.marks[freeRow * n + c] === 0)!;
+  await clickOn('.cell', freeRow * n + freeCol);
+  await sleep(350);
+  check('earlier pieces and tracker icons are not redrawn by later moves', await js(`document.querySelector('.cell .piece').__kept === true && document.querySelector('.kind.found').__kept === true`));
+  await clickOn('.cell', freeRow * n + freeCol);
+  await sleep(350);
+}
 
 /* 6. Reload: the unfinished level comes back as it was (flow F08). */
 const before = (await session()).state;
@@ -271,6 +297,13 @@ await load();
 await clickOn('.levelbtn', 49);
 check('level 50 is a 9 x 9 board', (await js(`document.querySelectorAll('.cell').length`)) === 81);
 await shot('docs/screens/S04-9x9.png');
+for (const [w, hgt] of [[375, 667], [393, 852]] as const) {
+  await viewport(w, hgt, 1);
+  await sleep(200);
+  const fit = await fitsScreen();
+  check(`a 9 x 9 level fits one screen at ${w} x ${hgt}`, fit.square && fit.inside, JSON.stringify(fit));
+  check(`9 x 9 cells are at least 32px at ${w} x ${hgt}`, fit.cell >= 32, `cell ${fit.cell}px`);
+}
 for (const [w, hgt] of [[390, 844], [1440, 900]] as const) {
   await viewport(w, hgt, 1);
   await sleep(150);
@@ -288,7 +321,7 @@ await load();
 await clickOn('.levelbtn', 0);
 await clickOn('.iconbtn[aria-label="Settings"]');
 const toggles = await js(`[...document.querySelectorAll('.dialog .toggle span')].map(e => e.textContent).join(' | ')`);
-check('settings has no easy mode', !/easy/i.test(toggles) && toggles.split(' | ').length === 2, toggles);
+check('settings has no easy mode', !/easy/i.test(toggles) && toggles.split(' | ').length === 3 && toggles.startsWith('Vibration'), toggles);
 await js(`localStorage.clear(); localStorage.setItem('pz.v1.progress', JSON.stringify({ next: 7, best: { 1: { ms: 5000, mistakes: 0 } } }))`);
 await load();
 check('old progress carries over and the old keys are removed', (await js('window.__pz.progress().next')) === 7 && (await js(`localStorage.getItem('pz.v1.progress')`)) === null);

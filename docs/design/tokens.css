@@ -32,6 +32,7 @@
   --overlay-cell-dim: rgba(31,36,48,0.38);
   --overlay-scrim: rgba(31,36,48,0.55);
   --overlay-cell-line: rgba(31,36,48,0.12);
+  --overlay-cell-press: rgba(255,255,255,0.28);
   --font-sans: Nunito, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   --font-arabic: Cairo, system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -90,6 +91,7 @@
   --scale-piece-pad: 0.07;
   --scale-lost: 0.6;
   --scale-unlit: 0.4;
+  --scale-cell-pressed: 0.9;
   --shadow-card: 0 1px 2px rgba(31,36,48,.06), 0 2px 6px rgba(31,36,48,.08);
   --shadow-pop: 0 12px 32px rgba(31,36,48,.18);
   --shadow-glow: 0 0 4px rgba(255,200,60,.9);
@@ -97,4 +99,6 @@
   --motion-base: 200ms;
   --motion-celebrate: 600ms;
   --motion-ease: cubic-bezier(.2,.8,.2,1);
+  --motion-screen: 220ms;
+  --motion-spring: cubic-bezier(.3,1.5,.5,1);
 }

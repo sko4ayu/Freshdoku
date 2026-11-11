@@ -32,6 +32,8 @@ interface Session {
 interface Settings {
   /** Draw a line where two kinds meet, for players who cannot tell the colours apart. */
   outlines: boolean;
+  /** Vibration on taps, finds and mistakes, where the device supports it. */
+  haptics: boolean;
   showRules: boolean;
 }
 
@@ -73,7 +75,7 @@ const DOUBLE_TAP_MS = 300;
 let progress = load<Progress>('progress', { next: 1, best: {} });
 migrateFromV1();
 let wallet = load<{ hints: number }>('wallet', { hints: HINTS_START });
-let settings = load<Settings>('settings', { outlines: false, showRules: true });
+let settings = load<Settings>('settings', { outlines: false, haptics: true, showRules: true });
 let session: Session | null = restoreSession();
 
 /** Earlier builds saved under another prefix and tracked time. Only the unlocked level carries over. */
@@ -105,6 +107,31 @@ function restoreSession(): Session | null {
     Array.isArray(st.marks) &&
     st.marks.length === puzzle.size * puzzle.size;
   return ok ? { level: s.level, state: st } : null;
+}
+
+/* ---------- touch feedback ---------- */
+
+type Feedback = 'tap' | 'found' | 'error' | 'win';
+
+/**
+ * Vibration. Inside the packaged app it uses the Capacitor Haptics plugin
+ * when that plugin is installed; in a browser it falls back to the Vibration
+ * API where one exists (iPhone browsers have none). Never throws.
+ */
+function feedback(kind: Feedback): void {
+  if (!settings.haptics) return;
+  try {
+    const plugin = (window as unknown as { Capacitor?: { Plugins?: { Haptics?: any } } }).Capacitor?.Plugins?.Haptics;
+    if (plugin) {
+      if (kind === 'error') void plugin.notification({ type: 'ERROR' });
+      else if (kind === 'win') void plugin.notification({ type: 'SUCCESS' });
+      else void plugin.impact({ style: kind === 'found' ? 'MEDIUM' : 'LIGHT' });
+      return;
+    }
+    navigator.vibrate?.(kind === 'error' ? [40, 40, 40] : kind === 'win' ? [20, 40, 60] : kind === 'found' ? 20 : 8);
+  } catch {
+    /* feedback is optional */
+  }
 }
 
 /* ---------- small DOM helpers ---------- */
@@ -207,7 +234,7 @@ function openSettings(onChange: () => void): void {
     showHome();
   });
   const done = h('button', { class: 'btn', type: 'button', onclick: () => closeDialog?.() }, S.close);
-  openDialog(S.settingsTitle, [toggle(S.outlines, 'outlines'), toggle(S.showRules, 'showRules')], [reset, done], true);
+  openDialog(S.settingsTitle, [toggle(S.haptics, 'haptics'), toggle(S.outlines, 'outlines'), toggle(S.showRules, 'showRules')], [reset, done], true);
 }
 
 /* ---------- S03 home ---------- */
@@ -253,14 +280,14 @@ function showHome(page?: number): void {
   app.replaceChildren(
     h(
       'main',
-      { class: 'home' },
+      { class: 'screen home' },
       h('h1', {}, S.appTitle),
       h('p', {}, S.appTagline),
       play,
       h('p', {}, S.summary(done, totalScore, totalStars)),
       h('h2', {}, S.levels),
       pager,
-      grid,
+      h('div', { class: 'levelscroll' }, grid),
     ),
   );
   if (page === undefined) play.focus();
@@ -301,25 +328,25 @@ function openLevel(level: number, fresh = false): void {
   /* tracker and lives */
   const tracker = h('div', { class: 'pill', role: 'img' });
   const lives = h('div', { class: 'pill fixed', role: 'img' });
+  const kindEls = Array.from({ length: n }, (_, kind) => {
+    const icon = h('span', { class: 'kind' });
+    icon.innerHTML = kindIcon(kind);
+    return icon;
+  });
+  const lifeEls = Array.from({ length: START_LIVES }, () => h('span', { class: 'life' }));
+  tracker.append(...kindEls);
+  lives.append(...lifeEls);
+  // Only classes change here, so animations run once, on the element that changed.
   const renderStatus = (): void => {
     scoreEl.textContent = String(currentScore(state, puzzle));
-    const placed = foundCount(state);
     const foundKinds = new Set<number>();
     state.found.forEach((c, r) => {
       if (c !== -1) foundKinds.add(puzzle.regions[r][c]);
     });
-    tracker.setAttribute('aria-label', S.foundOf(placed, n));
-    tracker.replaceChildren(
-      ...Array.from({ length: n }, (_, kind) => {
-        const icon = h('span', { class: 'kind' + (foundKinds.has(kind) ? ' found' : '') });
-        icon.innerHTML = kindIcon(kind);
-        return icon;
-      }),
-    );
+    tracker.setAttribute('aria-label', S.foundOf(foundCount(state), n));
+    kindEls.forEach((el, kind) => el.classList.toggle('found', foundKinds.has(kind)));
     lives.setAttribute('aria-label', S.livesLeft(state.lives, START_LIVES));
-    lives.replaceChildren(
-      ...Array.from({ length: START_LIVES }, (_, i) => h('span', { class: 'life' + (i < state.lives ? '' : ' lost') })),
-    );
+    lifeEls.forEach((el, i) => el.classList.toggle('lost', i >= state.lives));
   };
 
   /* rules and message line */
@@ -338,6 +365,7 @@ function openLevel(level: number, fresh = false): void {
 
   /* board */
   const board = h('div', { class: 'board', role: 'grid', style: `--n:${n}` });
+  const shown: string[] = new Array<string>(n * n).fill('?');
   const cells: HTMLElement[] = [];
   for (let r = 0; r < n; r++) {
     for (let c = 0; c < n; c++) {
@@ -351,10 +379,10 @@ function openLevel(level: number, fresh = false): void {
         class: 'cell' + edges,
         role: 'button',
         tabindex: r === 0 && c === 0 ? 0 : -1,
+        'data-i': r * n + c,
         style: `background:var(--color-region-${reg + 1})`,
       });
       const i = r * n + c;
-      cell.addEventListener('click', () => onTap(i));
       cell.addEventListener('keydown', (e) => onKey(e, i));
       cells.push(cell);
       board.append(cell);
@@ -369,6 +397,11 @@ function openLevel(level: number, fresh = false): void {
     const cell = cells[i];
     const isFound = state.found[r] === c;
     const given = isFound && puzzle.givens.includes(r);
+    // Redraw a cell only when what it shows has changed. Redrawing every
+    // cell on every move restarted the animation of every piece on the board.
+    const key = isFound ? (given ? 'given' : 'found') : 'mark' + state.marks[i];
+    if (shown[i] === key) return;
+    shown[i] = key;
     let label = S.cellEmpty;
     if (isFound) {
       const piece = h('span', { class: 'piece' + (given ? ' given' : ''), style: `--i:${r}` });
@@ -436,7 +469,41 @@ function openLevel(level: number, fresh = false): void {
     renderHintBtn();
   });
 
-  /* input */
+  /* input: pointer events, so a touch is felt the moment the finger lands */
+  const cellIndex = (target: EventTarget | null): number => {
+    const cell = target instanceof Element ? target.closest<HTMLElement>('.cell') : null;
+    return cell?.dataset.i !== undefined ? Number(cell.dataset.i) : -1;
+  };
+  let pressed = -1;
+  const release = (): void => {
+    if (pressed >= 0) cells[pressed].classList.remove('pressed');
+    pressed = -1;
+  };
+  board.addEventListener('pointerdown', (e) => {
+    if (!e.isPrimary || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    release();
+    const i = cellIndex(e.target);
+    if (i < 0 || state.status !== 'playing') return;
+    pressed = i;
+    cells[i].classList.add('pressed');
+  });
+  board.addEventListener('pointerup', (e) => {
+    if (pressed < 0) return;
+    const i = pressed;
+    release();
+    // The finger may slide off before lifting; that cancels the tap.
+    if (cellIndex(document.elementFromPoint(e.clientX, e.clientY)) === i) onTap(i);
+  });
+  board.addEventListener('pointercancel', release);
+  board.addEventListener('pointerleave', release);
+  // Assistive technology activates a cell with a synthetic click (no pointer).
+  board.addEventListener('click', (e) => {
+    if (e.detail !== 0) return;
+    const i = cellIndex(e.target);
+    if (i >= 0) onTap(i);
+  });
+  board.addEventListener('contextmenu', (e) => e.preventDefault());
+
   let lastTap = { i: -1, at: 0, toggled: false };
   const onTap = (i: number): void => {
     if (state.status !== 'playing') return;
@@ -452,6 +519,7 @@ function openLevel(level: number, fresh = false): void {
     }
     const toggled = toggleMark(state, r, c);
     lastTap = { i, at: now, toggled };
+    if (toggled) feedback('tap');
     renderCell(i);
     persist();
   };
@@ -464,18 +532,20 @@ function openLevel(level: number, fresh = false): void {
     if (result === 'wrong' || result === 'lost') {
       cells[i].classList.add('error');
       window.setTimeout(() => cells[i].classList.remove('error'), 600);
-      navigator.vibrate?.(60);
+      feedback('error');
     }
     if (result === 'wrong') {
       message.textContent = S.wrong(state.lives);
       announce(S.wrong(state.lives));
     } else if (result === 'found') {
+      feedback('found');
       message.textContent = S.howTo;
       announce(S.placed);
     } else if (result === 'lost') {
       message.textContent = '';
       finishLost();
     } else if (result === 'won') {
+      feedback('win');
       finishWon();
     }
     renderHintBtn();
@@ -537,7 +607,11 @@ function openLevel(level: number, fresh = false): void {
       h('button', { class: 'btn secondary', type: 'button', onclick: () => showHome() }, S.home),
     ];
     const body: Node[] = [
-      h('p', { class: 'bigstars', role: 'img', 'aria-label': S.starsLabel(stars) }, '\u2605'.repeat(stars) + '\u2606'.repeat(3 - stars)),
+      h(
+        'p',
+        { class: 'bigstars', role: 'img', 'aria-label': S.starsLabel(stars) },
+        ...[0, 1, 2].map((k) => h('span', { class: k < stars ? 'on' : 'off', style: `--i:${k}` }, k < stars ? '\u2605' : '\u2606')),
+      ),
       h('p', {}, S.wonBody(score, state.mistakes, state.hintsUsed) + (prev && !improved ? ' ' + S.bestStays(prev.score) : '') + (earned ? ' ' + S.hintEarned : '')),
     ];
     window.setTimeout(() => openDialog(S.wonTitle, body, actions), 700);
@@ -564,11 +638,11 @@ function openLevel(level: number, fresh = false): void {
   app.replaceChildren(
     h(
       'main',
-      {},
+      { class: 'screen game' },
       header,
       h('div', { class: 'row spread' }, tracker, lives),
       rules,
-      board,
+      h('div', { class: 'boardwrap' }, board),
       message,
       h('div', { class: 'row' }, hintBtn, restart),
     ),

@@ -1,6 +1,6 @@
 /* App styles. Every colour, size and duration comes from tokens.css. */
 * { box-sizing: border-box; margin: 0; }
-html, body { height: 100%; }
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
 body {
   background: var(--color-bg);
   color: var(--color-text);
@@ -10,13 +10,24 @@ body {
   font-weight: var(--text-base-weight);
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+  /* A game screen, not a page: nothing scrolls, selects, zooms or shows a callout. */
+  position: fixed; inset: 0;
+  user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
 }
 #app {
   max-width: var(--size-content-max);
+  height: 100%;
   margin: 0 auto;
-  padding: var(--space-2) var(--size-screen-padding) var(--space-6);
-  min-height: 100%;
+  padding:
+    calc(env(safe-area-inset-top, 0px) + var(--space-2))
+    calc(env(safe-area-inset-right, 0px) + var(--size-screen-padding))
+    calc(env(safe-area-inset-bottom, 0px) + var(--space-3))
+    calc(env(safe-area-inset-left, 0px) + var(--size-screen-padding));
+  display: flex; flex-direction: column;
 }
+.screen { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: screen-in var(--motion-screen) var(--motion-ease); }
+.header, .row, .rules, .message { flex: none; }
+.boardwrap { flex: 1; min-height: 0; display: grid; place-items: center; container-type: size; }
 button { font: inherit; color: inherit; cursor: pointer; }
 :focus-visible { outline: var(--border-focus) solid var(--color-accent); outline-offset: var(--size-focus-offset); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -44,10 +55,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
   display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; min-width: 0;
 }
 .pill.fixed { flex: none; flex-wrap: nowrap; }
-.kind { width: var(--size-kind); height: var(--size-kind); display: grid; filter: grayscale(1); opacity: var(--scale-unlit); transition: opacity var(--motion-base) var(--motion-ease), filter var(--motion-base) var(--motion-ease); }
+.pill:not(.fixed) { flex: 0 1 auto; flex-wrap: nowrap; }
+.kind { flex: 0 1 var(--size-kind); min-width: 0; aspect-ratio: 1; display: grid; filter: grayscale(1); opacity: var(--scale-unlit); transition: opacity var(--motion-base) var(--motion-ease), filter var(--motion-base) var(--motion-ease); }
 .kind svg { width: 100%; height: 100%; }
-.kind.found { filter: drop-shadow(var(--shadow-glow)); opacity: 1; animation: pop var(--motion-base) var(--motion-ease); }
+.kind.found { filter: drop-shadow(var(--shadow-glow)); opacity: 1; animation: pop var(--motion-base) var(--motion-spring); }
 .life { width: var(--size-dot); height: var(--size-dot); background: var(--color-life); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.life { transition: transform var(--motion-base) var(--motion-spring), background-color var(--motion-base) var(--motion-ease); }
 .life.lost { background: var(--color-life-lost); transform: scale(var(--scale-lost)); }
 
 /* Rules and messages */
@@ -68,7 +81,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--color-surface); border: var(--size-board-frame) solid var(--color-board-frame);
   border-radius: var(--radius-lg); padding: var(--size-board-padding);
   display: grid; grid-template-columns: repeat(var(--n), 1fr); container-type: inline-size;
-  user-select: none; -webkit-user-select: none;
+  width: min(100cqw, 100cqh); touch-action: none;
+  animation: board-in var(--motion-screen) var(--motion-ease);
 }
 .cell {
   aspect-ratio: 1; display: grid; place-items: center; position: relative; cursor: pointer;
@@ -76,6 +90,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
   font-weight: var(--text-xl-weight); line-height: 1;
   --cell: calc(100cqw / var(--n));
 }
+.cell > * { transition: transform var(--motion-fast) var(--motion-ease); }
+.cell.pressed > * { transform: scale(var(--scale-cell-pressed)); }
+.cell.pressed::before { content: ""; position: absolute; inset: 0; background: var(--overlay-cell-press); pointer-events: none; }
+.cell .mark { animation: pop var(--motion-fast) var(--motion-ease); }
 .board.outlined .cell.bt { border-top: var(--border-region) solid var(--color-mark); }
 .board.outlined .cell.bb { border-bottom: var(--border-region) solid var(--color-mark); }
 .board.outlined .cell.bl { border-left: var(--border-region) solid var(--color-mark); }
@@ -88,7 +106,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   width: calc(var(--scale-piece) * 100%); height: calc(var(--scale-piece) * 100%); border-radius: var(--radius-pill);
   background: var(--color-surface); box-shadow: var(--shadow-card); display: grid; place-items: center;
   padding: calc(var(--cell) * var(--scale-piece-pad));
-  animation: pop var(--motion-base) var(--motion-ease);
+  animation: pop var(--motion-base) var(--motion-spring);
 }
 .cell .piece.given { background: var(--color-surface-muted); animation: none; }
 .cell.hint { outline: var(--border-outline) solid var(--color-accent); outline-offset: calc(var(--border-outline) * -1); z-index: 1; }
@@ -96,6 +114,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cell.dim::after { content: ""; position: absolute; inset: 0; background: var(--overlay-cell-dim); pointer-events: none; }
 .board.won .piece { animation: bounce var(--motion-celebrate) var(--motion-ease); animation-delay: calc(var(--i) * var(--motion-fast)); }
 
+@keyframes screen-in { from { opacity: 0; transform: translateY(var(--space-3)); } to { opacity: 1; transform: none; } }
+@keyframes board-in { from { opacity: 0; transform: scale(var(--scale-pressed)); } to { opacity: 1; transform: none; } }
+@keyframes star-in { from { opacity: 0; transform: scale(.2) rotate(-40deg); } to { opacity: 1; transform: none; } }
 @keyframes pop { from { transform: scale(.6); } to { transform: scale(1); } }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-6%); } 75% { transform: translateX(6%); } }
 @keyframes bounce { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-22%); } }
@@ -115,10 +136,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .btn.block { width: 100%; }
 
 /* Home */
-.home { padding-top: var(--space-7); text-align: center; }
+.home { padding-top: var(--space-5); text-align: center; }
+.home > * { flex: none; }
+.home .levelscroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; padding: var(--space-1) var(--space-1) var(--space-4); }
 .home h1 { font-size: var(--text-display-size); line-height: var(--text-display-line); font-weight: var(--text-display-weight); }
-.home p { color: var(--color-text-muted); margin: var(--space-3) 0 var(--space-6); }
-.home h2 { font-size: var(--text-lg-size); line-height: var(--text-lg-line); font-weight: var(--text-lg-weight); margin: var(--space-6) 0 var(--space-3); text-align: start; }
+.home p { color: var(--color-text-muted); margin: var(--space-3) 0 var(--space-4); }
+.home h2 { font-size: var(--text-lg-size); line-height: var(--text-lg-line); font-weight: var(--text-lg-weight); margin: var(--space-3) 0 var(--space-2); text-align: start; }
 .levelgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--size-button), 1fr)); gap: var(--space-2); }
 .levelbtn {
   height: var(--size-button); border-radius: var(--radius-sm); border: var(--border-hairline) solid var(--color-border-input);
@@ -146,3 +169,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .levelbtn.done { padding-bottom: var(--space-2); }
 .bigstars { font-size: var(--text-display-size); line-height: var(--text-display-line); color: var(--color-warning); letter-spacing: var(--space-1); }
 .dialog .bigstars { margin: var(--space-2) 0 0; color: var(--color-warning); }
+.bigstars span { display: inline-block; }
+.bigstars .on { animation: star-in var(--motion-celebrate) var(--motion-spring) both; animation-delay: calc(var(--i) * var(--motion-base) + var(--motion-base)); }
+.scrim { animation: fade-in var(--motion-base) var(--motion-ease); }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* Short screens: the board matters more than the rule reminders. */
+@media (max-height: 720px) { .rules { display: none; } .message { min-height: var(--text-sm-line); } }
