@@ -22,7 +22,7 @@ export class Grid {
   /** 1 when the cell may still hold a piece (a placed piece keeps its 1). */
   readonly cand: Uint8Array;
   /** Column of the piece in each row, or -1. */
-  readonly cat: Int8Array;
+  readonly placed: Int8Array;
   /** Rows are units 0..n-1, columns n..2n-1, regions 2n..3n-1. */
   readonly units: number[][];
   readonly unitDone: Uint8Array;
@@ -33,7 +33,7 @@ export class Grid {
     this.n = n;
     this.regions = regions;
     this.cand = new Uint8Array(n * n).fill(1);
-    this.cat = new Int8Array(n).fill(-1);
+    this.placed = new Int8Array(n).fill(-1);
     this.unitDone = new Uint8Array(3 * n);
     if (shared) {
       this.units = shared.units;
@@ -64,7 +64,7 @@ export class Grid {
   clone(): Grid {
     const g = new Grid(this.regions, { units: this.units, attackList: this.attackList });
     g.cand.set(this.cand);
-    g.cat.set(this.cat);
+    g.placed.set(this.placed);
     g.unitDone.set(this.unitDone);
     return g;
   }
@@ -84,8 +84,8 @@ export class Grid {
     return this.attackList[i];
   }
 
-  isCat(i: number): boolean {
-    return this.cat[Math.floor(i / this.n)] === i % this.n;
+  isPlaced(i: number): boolean {
+    return this.placed[Math.floor(i / this.n)] === i % this.n;
   }
 
   /** Puts a piece on a cell. Returns false when the cell was already ruled out. */
@@ -93,9 +93,9 @@ export class Grid {
     const n = this.n;
     const i = r * n + c;
     if (!this.cand[i]) return false;
-    if (this.cat[r] === c) return true;
-    if (this.cat[r] !== -1) return false;
-    this.cat[r] = c;
+    if (this.placed[r] === c) return true;
+    if (this.placed[r] !== -1) return false;
+    this.placed[r] = c;
     this.unitDone[r] = 1;
     this.unitDone[n + c] = 1;
     this.unitDone[2 * n + this.regions[r][c]] = 1;
@@ -108,7 +108,7 @@ export class Grid {
   }
 
   solved(): boolean {
-    for (let r = 0; r < this.n; r++) if (this.cat[r] === -1) return false;
+    for (let r = 0; r < this.n; r++) if (this.placed[r] === -1) return false;
     return true;
   }
 
@@ -159,7 +159,7 @@ function findBlocker(g: Grid): Step | null {
     const hit: number[] = [];
     // A blocking cell must attack list[0], so only those need checking.
     for (const x of g.attacksOf(list[0])) {
-      if (!g.cand[x] || inList.has(x) || g.isCat(x)) continue;
+      if (!g.cand[x] || inList.has(x) || g.isPlaced(x)) continue;
       const attacked = new Set(g.attacksOf(x));
       if (list.every((i) => attacked.has(i))) hit.push(x);
     }
@@ -275,9 +275,9 @@ function findGroup(g: Grid, k: 2 | 3): Step | null {
 function findChain(g: Grid): Step | null {
   const n = g.n;
   for (let i = 0; i < n * n; i++) {
-    if (!g.cand[i] || g.isCat(i)) continue;
+    if (!g.cand[i] || g.isPlaced(i)) continue;
     const [r, c] = g.cellOf(i);
-    if (g.cat[r] !== -1) continue;
+    if (g.placed[r] !== -1) continue;
     const trial = g.clone();
     trial.place(r, c);
     let dead = trial.deadEnd();

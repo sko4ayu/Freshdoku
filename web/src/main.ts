@@ -1,13 +1,15 @@
 import pack from '../../levels/pack-001.json';
 import {
-  catsPlaced,
+  currentScore,
+  foundCount,
   GameState,
   generateLevel,
   hintFor,
-  MARK_AUTO,
+  levelStars,
+  MARK_REVEALED,
   MARK_NONE,
   newGame,
-  placeCat,
+  pick,
   Puzzle,
   START_LIVES,
   toggleMark,
@@ -20,21 +22,20 @@ import { S } from './strings';
 
 interface Progress {
   next: number; // lowest unsolved level, 1-based
-  best: Record<string, { ms: number; mistakes: number }>;
+  /** Best result per level number. Replaying a level can only raise it. */
+  best: Record<string, { score: number; stars: number }>;
 }
 interface Session {
   level: number;
   state: GameState;
 }
 interface Settings {
-  /** Easy mode: the game marks the cells a found piece rules out. Off by default. */
-  assistMarks: boolean;
   /** Draw a line where two kinds meet, for players who cannot tell the colours apart. */
   outlines: boolean;
   showRules: boolean;
 }
 
-const PREFIX = 'pz.v1.';
+const PREFIX = 'fd.v2.';
 function load<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(PREFIX + key);
@@ -68,12 +69,28 @@ const PAGE = 60;
 const HINTS_START = 3;
 const HINTS_MAX = 5;
 const DOUBLE_TAP_MS = 300;
-const SAVE_EVERY_MS = 5000;
 
 let progress = load<Progress>('progress', { next: 1, best: {} });
+migrateFromV1();
 let wallet = load<{ hints: number }>('wallet', { hints: HINTS_START });
-let settings = load<Settings>('settings', { assistMarks: false, outlines: false, showRules: true });
+let settings = load<Settings>('settings', { outlines: false, showRules: true });
 let session: Session | null = restoreSession();
+
+/** Earlier builds saved under another prefix and tracked time. Only the unlocked level carries over. */
+function migrateFromV1(): void {
+  try {
+    const old = localStorage.getItem('pz.v1.progress');
+    if (!old) return;
+    const next = Number(JSON.parse(old).next);
+    if (Number.isInteger(next) && next > progress.next) {
+      progress = { next, best: progress.best };
+      save('progress', progress);
+    }
+    for (const key of ['progress', 'session', 'wallet', 'settings']) localStorage.removeItem('pz.v1.' + key);
+  } catch {
+    /* nothing to migrate */
+  }
+}
 
 function restoreSession(): Session | null {
   const s = load<Partial<Session>>('session', {});
@@ -83,8 +100,8 @@ function restoreSession(): Session | null {
   const ok =
     !!puzzle &&
     st.puzzleId === puzzle.id &&
-    Array.isArray(st.cats) &&
-    st.cats.length === puzzle.size &&
+    Array.isArray(st.found) &&
+    st.found.length === puzzle.size &&
     Array.isArray(st.marks) &&
     st.marks.length === puzzle.size * puzzle.size;
   return ok ? { level: s.level, state: st } : null;
@@ -114,13 +131,6 @@ document.body.append(live);
 function announce(text: string): void {
   live.textContent = '';
   requestAnimationFrame(() => (live.textContent = text));
-}
-
-function formatTime(ms: number): string {
-  const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 /* ---------- dialogs ---------- */
@@ -197,17 +207,17 @@ function openSettings(onChange: () => void): void {
     showHome();
   });
   const done = h('button', { class: 'btn', type: 'button', onclick: () => closeDialog?.() }, S.close);
-  openDialog(S.settingsTitle, [toggle(S.assistMarks, 'assistMarks'), toggle(S.outlines, 'outlines'), toggle(S.showRules, 'showRules')], [reset, done], true);
+  openDialog(S.settingsTitle, [toggle(S.outlines, 'outlines'), toggle(S.showRules, 'showRules')], [reset, done], true);
 }
 
 /* ---------- S03 home ---------- */
 
-let timer: number | undefined;
-
 function showHome(page?: number): void {
-  window.clearInterval(timer);
   closeDialog?.();
   const done = progress.next - 1;
+  const results = Object.values(progress.best);
+  const totalScore = results.reduce((sum, b) => sum + b.score, 0);
+  const totalStars = results.reduce((sum, b) => sum + b.stars, 0);
   const resumable = session && session.state.status === 'playing' ? session.level : 0;
   const target = resumable || progress.next;
   const shown = page ?? Math.floor((target - 1) / PAGE);
@@ -221,12 +231,14 @@ function showHome(page?: number): void {
   for (let level = first; level <= last; level++) {
     const solved = level < progress.next;
     const locked = level > progress.next;
-    const label = locked ? S.levelLocked(level) : solved ? S.levelDone(level) : S.levelN(level);
+    const stars = progress.best[String(level)]?.stars ?? 0;
+    const label = locked ? S.levelLocked(level) : solved ? S.levelDone(level, stars) : S.levelN(level);
     const b = h(
       'button',
       { class: 'levelbtn' + (solved ? ' done' : ''), type: 'button', 'aria-label': label, disabled: locked },
       String(level),
     );
+    if (stars) b.append(h('span', { class: 'stars', 'aria-hidden': 'true' }, '\u2605'.repeat(stars)));
     b.addEventListener('click', () => openLevel(level));
     grid.append(b);
   }
@@ -245,7 +257,7 @@ function showHome(page?: number): void {
       h('h1', {}, S.appTitle),
       h('p', {}, S.appTagline),
       play,
-      h('p', {}, S.solvedCount(done)),
+      h('p', {}, S.summary(done, totalScore, totalStars)),
       h('h2', {}, S.levels),
       pager,
       grid,
@@ -261,14 +273,14 @@ function openLevel(level: number, fresh = false): void {
   const puzzle = getLevel(level);
   const n = puzzle.size;
   if (fresh || !session || session.level !== level) {
-    session = { level, state: newGame(puzzle, settings.assistMarks) };
+    session = { level, state: newGame(puzzle) };
   }
   const state = session.state;
   const persist = (): void => save('session', session);
   persist();
 
   /* header */
-  const timeEl = h('b', {}, formatTime(state.elapsedMs));
+  const scoreEl = h('b', {}, String(currentScore(state, puzzle)));
   const header = h(
     'div',
     { class: 'header' },
@@ -277,7 +289,7 @@ function openLevel(level: number, fresh = false): void {
       'div',
       { class: 'stats' },
       h('div', { class: 'stat' }, h('small', {}, S.level), h('b', {}, String(level))),
-      h('div', { class: 'stat' }, h('small', {}, S.time), timeEl),
+      h('div', { class: 'stat' }, h('small', {}, S.points), scoreEl),
     ),
     h(
       'button',
@@ -290,9 +302,10 @@ function openLevel(level: number, fresh = false): void {
   const tracker = h('div', { class: 'pill', role: 'img' });
   const lives = h('div', { class: 'pill fixed', role: 'img' });
   const renderStatus = (): void => {
-    const placed = catsPlaced(state);
+    scoreEl.textContent = String(currentScore(state, puzzle));
+    const placed = foundCount(state);
     const foundKinds = new Set<number>();
-    state.cats.forEach((c, r) => {
+    state.found.forEach((c, r) => {
       if (c !== -1) foundKinds.add(puzzle.regions[r][c]);
     });
     tracker.setAttribute('aria-label', S.foundOf(placed, n));
@@ -354,16 +367,16 @@ function openLevel(level: number, fresh = false): void {
     const r = Math.floor(i / n);
     const c = i % n;
     const cell = cells[i];
-    const isCat = state.cats[r] === c;
-    const given = isCat && puzzle.givens.includes(r);
+    const isFound = state.found[r] === c;
+    const given = isFound && puzzle.givens.includes(r);
     let label = S.cellEmpty;
-    if (isCat) {
+    if (isFound) {
       const piece = h('span', { class: 'piece' + (given ? ' given' : ''), style: `--i:${r}` });
       piece.innerHTML = kindIcon(puzzle.regions[r][c]);
       cell.replaceChildren(piece);
       label = given ? S.cellGiven : S.cellPiece;
     } else if (state.marks[i] !== MARK_NONE) {
-      const mark = h('span', { class: 'mark' + (state.marks[i] === MARK_AUTO ? ' auto' : '') });
+      const mark = h('span', { class: 'mark' + (state.marks[i] === MARK_REVEALED ? ' revealed' : '') });
       mark.innerHTML = WORM_ICON;
       cell.replaceChildren(mark);
       label = S.cellMarked;
@@ -419,6 +432,7 @@ function openLevel(level: number, fresh = false): void {
     state.hintsUsed++;
     save('wallet', wallet);
     persist();
+    renderStatus();
     renderHintBtn();
   });
 
@@ -444,7 +458,7 @@ function openLevel(level: number, fresh = false): void {
 
   const place = (r: number, c: number): void => {
     const i = r * n + c;
-    const result = placeCat(state, puzzle, r, c, settings.assistMarks);
+    const result = pick(state, puzzle, r, c);
     renderBoard();
     persist();
     if (result === 'wrong' || result === 'lost') {
@@ -455,7 +469,7 @@ function openLevel(level: number, fresh = false): void {
     if (result === 'wrong') {
       message.textContent = S.wrong(state.lives);
       announce(S.wrong(state.lives));
-    } else if (result === 'placed') {
+    } else if (result === 'found') {
       message.textContent = S.howTo;
       announce(S.placed);
     } else if (result === 'lost') {
@@ -500,16 +514,18 @@ function openLevel(level: number, fresh = false): void {
   /* endings */
   const finishWon = (): void => {
     board.classList.add('won');
+    const score = currentScore(state, puzzle);
+    const stars = levelStars(state.mistakes, state.hintsUsed);
     const key = String(level);
     const prev = progress.best[key];
-    if (!prev || state.elapsedMs < prev.ms) {
-      progress.best[key] = { ms: state.elapsedMs, mistakes: state.mistakes };
-    }
+    const improved = !prev || score > prev.score;
+    if (improved) progress.best[key] = { score, stars: Math.max(stars, prev?.stars ?? 0) };
     const firstTime = level >= progress.next;
     if (firstTime) progress.next = level + 1;
     save('progress', progress);
+    // A hint is earned for a level solved for the first time with no mistakes.
     let earned = false;
-    if (firstTime && wallet.hints < HINTS_MAX) {
+    if (firstTime && state.mistakes === 0 && wallet.hints < HINTS_MAX) {
       wallet = { hints: wallet.hints + 1 };
       save('wallet', wallet);
       earned = true;
@@ -520,7 +536,10 @@ function openLevel(level: number, fresh = false): void {
       h('button', { class: 'btn', type: 'button', onclick: () => (closeDialog?.(), openLevel(level + 1, true)) }, S.next),
       h('button', { class: 'btn secondary', type: 'button', onclick: () => showHome() }, S.home),
     ];
-    const body: Node[] = [h('p', {}, S.wonBody(formatTime(state.elapsedMs), state.mistakes) + (earned ? ' ' + S.hintEarned : ''))];
+    const body: Node[] = [
+      h('p', { class: 'bigstars', role: 'img', 'aria-label': S.starsLabel(stars) }, '\u2605'.repeat(stars) + '\u2606'.repeat(3 - stars)),
+      h('p', {}, S.wonBody(score, state.mistakes, state.hintsUsed) + (prev && !improved ? ' ' + S.bestStays(prev.score) : '') + (earned ? ' ' + S.hintEarned : '')),
+    ];
     window.setTimeout(() => openDialog(S.wonTitle, body, actions), 700);
   };
 
@@ -540,24 +559,6 @@ function openLevel(level: number, fresh = false): void {
     { class: 'btn secondary grow', type: 'button', onclick: () => openLevel(level, true) },
     S.restart,
   );
-
-  /* timer: counts only while the level is open, visible and still being played */
-  window.clearInterval(timer);
-  let lastTick = performance.now();
-  let sinceSave = 0;
-  timer = window.setInterval(() => {
-    const now = performance.now();
-    const delta = now - lastTick;
-    lastTick = now;
-    if (state.status !== 'playing' || document.hidden || closeDialog) return;
-    state.elapsedMs += delta;
-    sinceSave += delta;
-    timeEl.textContent = formatTime(state.elapsedMs);
-    if (sinceSave >= SAVE_EVERY_MS) {
-      sinceSave = 0;
-      persist();
-    }
-  }, 250);
 
   closeDialog?.();
   app.replaceChildren(

@@ -82,7 +82,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .board.outlined .cell.br { border-right: var(--border-region) solid var(--color-mark); }
 .cell:focus-visible { outline-offset: calc(var(--border-outline) * -1); outline-width: var(--border-outline); z-index: 1; }
 .cell .mark { width: calc(var(--cell) * var(--scale-mark)); height: calc(var(--cell) * var(--scale-mark)); display: grid; }
-.cell .mark.auto { width: calc(var(--cell) * var(--scale-auto-mark)); height: calc(var(--cell) * var(--scale-auto-mark)); }
+.cell .mark.revealed { width: calc(var(--cell) * var(--scale-auto-mark)); height: calc(var(--cell) * var(--scale-auto-mark)); }
 .cell .mark svg, .cell .piece svg { width: 100%; height: 100%; }
 .cell .piece {
   width: calc(var(--scale-piece) * 100%); height: calc(var(--scale-piece) * 100%); border-radius: var(--radius-pill);
@@ -141,3 +141,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .toggle input { width: var(--size-dot); height: var(--size-dot); accent-color: var(--color-accent); }
 .range { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .iconbtn:disabled { color: var(--color-text-muted); background: var(--color-surface-muted); box-shadow: none; cursor: default; }
+.levelbtn { position: relative; }
+.levelbtn .stars { position: absolute; left: 0; right: 0; bottom: var(--space-1); font-size: var(--text-xs-size); line-height: 1; font-weight: var(--text-base-weight); }
+.levelbtn.done { padding-bottom: var(--space-2); }
+.bigstars { font-size: var(--text-display-size); line-height: var(--text-display-line); color: var(--color-warning); letter-spacing: var(--space-1); }
+.dialog .bigstars { margin: var(--space-2) 0 0; color: var(--color-warning); }

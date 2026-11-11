@@ -1,0 +1,33 @@
+{
+  "date": "2026-11-11",
+  "generator": "g1",
+  "levels": 10000,
+  "failures": [],
+  "duplicate_boards": 0,
+  "sizes": {
+    "5": 8,
+    "6": 8,
+    "7": 1002,
+    "8": 2008,
+    "9": 2992,
+    "10": 3982
+  },
+  "tiers": {
+    "2": 898,
+    "3": 6995,
+    "4": 1120,
+    "5": 987
+  },
+  "grades": {
+    "3": 10,
+    "4": 656,
+    "5": 228,
+    "6": 177,
+    "7": 2350,
+    "8": 3836,
+    "9": 1345,
+    "10": 1398
+  },
+  "slowest_level_ms": 1963,
+  "note": "two parallel runs of tools/verify-levels.ts (1-5000, 5001-10000) on a 2-core build machine that was also running other checks"
+}

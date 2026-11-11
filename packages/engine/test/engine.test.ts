@@ -1,18 +1,20 @@
-import { describe, expect, test } from 'bun:test';
 import {
   attacks,
   bandFor,
-  generateLevel,
-  catsPlaced,
+  currentScore,
   findSolutions,
+  foundCount,
+  generateLevel,
   generatePuzzle,
   hintFor,
   isValidSolution,
-  MARK_AUTO,
+  levelScore,
+  levelStars,
   MARK_NONE,
   MARK_PLAYER,
+  MARK_REVEALED,
   newGame,
-  placeCat,
+  pick,
   regionsAreWellFormed,
   solveLogic,
   toggleMark,
@@ -110,54 +112,51 @@ describe('generator and solver', () => {
 describe('game', () => {
   const puzzle = generatePuzzle({ size: 6, seed: 2024, maxTier: 3 }) as Puzzle;
 
-  test('correct pieces win the game and add marks around them', () => {
+  test('correct picks win the game and the game adds no marks of its own', () => {
     const state = newGame(puzzle);
     let last = '';
     for (let r = 0; r < puzzle.size; r++) {
-      if (state.cats[r] !== -1) continue;
-      last = placeCat(state, puzzle, r, puzzle.solution[r]);
+      if (state.found[r] !== -1) continue;
+      last = pick(state, puzzle, r, puzzle.solution[r]);
     }
     expect(last).toBe('won');
     expect(state.status).toBe('won');
-    expect(catsPlaced(state)).toBe(puzzle.size);
+    expect(foundCount(state)).toBe(puzzle.size);
     expect(state.lives).toBe(3);
-    // every non-piece cell is attacked by some piece once the board is full
-    const empties = state.marks.filter((m, i) => {
-      const r = Math.floor(i / puzzle.size);
-      return state.cats[r] !== i % puzzle.size && m === MARK_NONE;
-    });
-    expect(empties.length).toBe(0);
+    expect(state.marks.every((m) => m === MARK_NONE)).toBe(true);
   });
 
-  test('three wrong pieces lose the game', () => {
+  test('three wrong picks lose the game; only the wrong cells are revealed', () => {
     const state = newGame(puzzle);
     const wrongCol = (r: number): number => (puzzle.solution[r] + 1) % puzzle.size;
-    const rows = Array.from({ length: puzzle.size }, (_, r) => r).filter((r) => state.cats[r] === -1);
-    expect(placeCat(state, puzzle, rows[0], wrongCol(rows[0]))).toBe('wrong');
+    const rows = Array.from({ length: puzzle.size }, (_, r) => r).filter((r) => state.found[r] === -1);
+    expect(pick(state, puzzle, rows[0], wrongCol(rows[0]))).toBe('wrong');
     expect(state.lives).toBe(2);
-    expect(state.marks[rows[0] * puzzle.size + wrongCol(rows[0])]).toBe(MARK_AUTO);
-    expect(placeCat(state, puzzle, rows[1], wrongCol(rows[1]))).toBe('wrong');
-    expect(placeCat(state, puzzle, rows[2], wrongCol(rows[2]))).toBe('lost');
+    expect(state.marks[rows[0] * puzzle.size + wrongCol(rows[0])]).toBe(MARK_REVEALED);
+    expect(pick(state, puzzle, rows[1], wrongCol(rows[1]))).toBe('wrong');
+    expect(pick(state, puzzle, rows[2], wrongCol(rows[2]))).toBe('lost');
     expect(state.status).toBe('lost');
-    expect(placeCat(state, puzzle, rows[0], puzzle.solution[rows[0]])).toBe('ignored');
+    expect(state.marks.filter((m) => m !== MARK_NONE).length).toBe(3);
+    expect(pick(state, puzzle, rows[0], puzzle.solution[rows[0]])).toBe('ignored');
   });
 
-  test('marks toggle and never land on a piece', () => {
-    const state = newGame(puzzle, false);
-    const r = state.cats.findIndex((c) => c === -1);
+  test('marks toggle and never land on a found cell', () => {
+    const state = newGame(puzzle);
+    const r = state.found.findIndex((c) => c === -1);
     const c = (puzzle.solution[r] + 2) % puzzle.size;
     expect(toggleMark(state, r, c)).toBe(true);
     expect(state.marks[r * puzzle.size + c]).toBe(MARK_PLAYER);
     expect(toggleMark(state, r, c)).toBe(true);
     expect(state.marks[r * puzzle.size + c]).toBe(MARK_NONE);
-    placeCat(state, puzzle, r, puzzle.solution[r], false);
+    pick(state, puzzle, r, puzzle.solution[r]);
     expect(toggleMark(state, r, puzzle.solution[r])).toBe(false);
   });
 
-  test('state survives a save and restore', () => {
+  test('state has no time field and survives a save and restore', () => {
     const state = newGame(puzzle);
-    const r = state.cats.findIndex((c) => c === -1);
-    placeCat(state, puzzle, r, puzzle.solution[r]);
+    const r = state.found.findIndex((c) => c === -1);
+    pick(state, puzzle, r, puzzle.solution[r]);
+    expect('elapsedMs' in state).toBe(false);
     const restored = JSON.parse(JSON.stringify(state));
     expect(restored).toEqual(state);
   });
@@ -165,7 +164,7 @@ describe('game', () => {
   test('following hints alone solves the puzzle without a mistake', () => {
     for (const seed of [5, 6, 7, 8]) {
       const p = generatePuzzle({ size: 8, seed, maxTier: 5 }) as Puzzle;
-      const state = newGame(p, false);
+      const state = newGame(p);
       for (let guard = 0; guard < 2000 && state.status === 'playing'; guard++) {
         const hint = hintFor(state, p);
         expect(hint).not.toBeNull();
@@ -173,7 +172,7 @@ describe('game', () => {
         expect(step.cells.length).toBeGreaterThan(0);
         if (step.kind === 'place') {
           const [r, c] = step.cells[0];
-          expect(placeCat(state, p, r, c, false)).not.toBe('wrong');
+          expect(pick(state, p, r, c)).not.toBe('wrong');
         } else {
           for (const [r, c] of step.cells) {
             expect(p.solution[r]).not.toBe(c);
@@ -184,6 +183,38 @@ describe('game', () => {
       expect(state.status).toBe('won');
       expect(state.mistakes).toBe(0);
     }
+  });
+});
+
+describe('score', () => {
+  test('points: 100 per difficulty grade, minus 20% per mistake and 10% per hint, floor 20%', () => {
+    expect(levelScore(5, 0, 0)).toBe(500);
+    expect(levelScore(5, 1, 0)).toBe(400);
+    expect(levelScore(5, 0, 1)).toBe(450);
+    expect(levelScore(5, 1, 1)).toBe(350);
+    expect(levelScore(5, 2, 2)).toBe(200);
+    expect(levelScore(5, 9, 9)).toBe(100); // floor
+    expect(levelScore(1, 0, 0)).toBe(100);
+    expect(levelScore(10, 0, 0)).toBe(1000);
+  });
+
+  test('stars: 3 clean, 2 for one mistake or hints only, 1 otherwise', () => {
+    expect(levelStars(0, 0)).toBe(3);
+    expect(levelStars(1, 0)).toBe(2);
+    expect(levelStars(0, 1)).toBe(2);
+    expect(levelStars(0, 4)).toBe(2);
+    expect(levelStars(1, 1)).toBe(1);
+    expect(levelStars(2, 0)).toBe(1);
+    expect(levelStars(7, 0)).toBe(1);
+  });
+
+  test('current score follows the state', () => {
+    const puzzle = generatePuzzle({ size: 6, seed: 2024, maxTier: 3 }) as Puzzle;
+    const state = newGame(puzzle);
+    expect(currentScore(state, puzzle)).toBe(100 * puzzle.difficulty);
+    const r = state.found.findIndex((c) => c === -1);
+    pick(state, puzzle, r, (puzzle.solution[r] + 1) % puzzle.size);
+    expect(currentScore(state, puzzle)).toBe(Math.round(100 * puzzle.difficulty * 0.8));
   });
 });
 
